@@ -58,9 +58,9 @@ int Constants::kMaxNewtonIteration_=50;
 int Constants::kMeshSeedsAlongSiliconThickness_=5;
 int Constants::kMeshSeedsAlongSTitaniumThickness_=1;
 double Constants::kMinYCoordinate_=0.0;
-double Constants::kTemperatureTolerance_ = 1.0;
-double Constants::kCutoff_ = 0.99;
-double Constants::lambda_ = 1e-11;//1e-11;
+double Constants::kTemperatureTolerance_ = 1.0e-5;
+double Constants::kCutoff_ = 0.98;
+double Constants::lambda_ = 0;//5e-12;//1e-11;
 
 class ModelGeometry{
 public:
@@ -2415,6 +2415,8 @@ int InverseAnalysisMatrices::HeatGenerationSolver(Eigen::VectorXd &temperature_n
     LHS_matrix_ = R_matrix_*sensitivity_matrix_;
     LHS_normal_equations_ = LHS_matrix_.transpose()*LHS_matrix_ + Constants::lambda_*(Eigen::MatrixXd::Identity(Constants::kNumOfHeaters_, Constants::kNumOfHeaters_));
     heat_generation_increments_ = LHS_normal_equations_.jacobiSvd(Eigen::ComputeThinU|Eigen::ComputeThinV).solve(LHS_matrix_.transpose()*temperature_increment_);
+//    std::cout << heat_generation_increments_ << std::endl<<std::endl;
+//    getchar();
     current_heat_generation_ += heat_generation_increments_;
   }
   return 0;
