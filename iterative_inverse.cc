@@ -1022,7 +1022,7 @@ double TemperatureDependentVariables::get_body_heat_flux(const double temperatur
   double current_in_element_a = current_in_element_ma*1.0e-3;  // mA -> A
   double heater_crosssection_area_m_square=heater_crosssection_area_mm_square_*1.0e-3*1.0e-3;  //mm^2->m^2
   resistivity=-6.674e-13*temperature*temperature+2.462e-9*temperature-1.893e-07;// titanium heater
-  body_heat_flux = resistivity*pow((current_in_element_a/heater_crosssection_area_m_square),2);
+  body_heat_flux = resistivity*pow((current_in_element_a/heater_crosssection_area_m_square), 2);
   body_heat_flux *= 1.0e-6;
   return body_heat_flux;
 }
@@ -1066,6 +1066,7 @@ public:
     {return elements_as_heater_;}
   void HeatSupply(int, int, std::vector<double>&, std::vector<int>&,std::vector<int>&, std::vector<double>&,   
   TemperatureDependentVariables*,Initialization *);
+  void HeatSupplyInverse(int, int, std::vector<double>&, std::vector<int>&, Eigen::VectorXd &, Initialization *);
   void PrintHeaterElements(){
     for(int i=0;i<num_of_elements_as_heater_;i++)
       printf("elements_as_heater_[%d] = %d\n", i, elements_as_heater_[i]);
@@ -1106,7 +1107,7 @@ void HeaterElements::set_elements_as_heater(Initialization *const initialization
   }
 }
 
-void HeaterElements::HeatSupply(const int element_number, const int heater_element_number, std::vector<double>&heat_load, std::vector<int>&nodes_in_elements, std::vector<int>&equation_numbers_in_elements, std::vector<double>&current_temperature_field, TemperatureDependentVariables *const temperature_dependent_variables,Initialization *const initialization){//Calculate internal load contribution      
+void HeaterElements::HeatSupply(const int element_number, const int heater_element_number, std::vector<double>&heat_load, std::vector<int>&nodes_in_elements, std::vector<int>&equation_numbers_in_elements, std::vector<double>&current_temperature_field, TemperatureDependentVariables *const temperature_dependent_variables, Initialization *const initialization){//Calculate internal load contribution      
   //integration rule
   int num_of_integration_points=2;
   double coordinates_of_integration_points[2]={-0.57735026, 0.57735026}; //gaussian quadrature coordinates
@@ -1135,6 +1136,38 @@ void HeaterElements::HeatSupply(const int element_number, const int heater_eleme
         if(equation_number>=0){
           heat_load[equation_number] += shape_function_[j]*
           (*temperature_dependent_variables).get_body_heat_flux(temperature,current)*determinant_of_jacobian_matrix_*ksi_weight*eta_weight;
+        }//if
+      }//for j
+    }//for l
+  }//for k
+//  printf("processing heat supply element completed\n");
+}
+
+void HeaterElements::HeatSupplyInverse(const int element_number, const int heater_element_number, std::vector<double>&heat_load, std::vector<int>&equation_numbers_in_elements, Eigen::VectorXd &current_heat_generation, Initialization *const initialization){//Calculate internal load contribution      
+  //integration rule
+  int num_of_integration_points=2;
+  double coordinates_of_integration_points[2]={-0.57735026, 0.57735026}; //gaussian quadrature coordinates
+  double weights_of_integration_points[2]={1.0, 1.0};//weight of gaussian point
+  
+  int heater_number=heater_element_number/(*((*initialization).get_mesh_parameters())).get_mesh_seeds_on_heater();
+
+  for(int k=0;k<num_of_integration_points;k++){
+    double ksi_coordinate=coordinates_of_integration_points[k];  //gaussian piont coordinate
+    double ksi_weight=weights_of_integration_points[k];    //weight of gaussian quadrature
+    for(int l=0;l<num_of_integration_points;l++){
+      double eta_coordinate=coordinates_of_integration_points[l]; 
+      double eta_weight=weights_of_integration_points[l];  
+
+      set_shape_function(ksi_coordinate, eta_coordinate);
+      set_shape_function_derivatives(ksi_coordinate, eta_coordinate);
+      set_determinant_of_jacobian_matrix();  
+
+
+      for(int j=0;j<Constants::kNumOfNodesInElement_;j++){
+        double equation_number=equation_numbers_in_elements[j+element_number*4];
+        if(equation_number>=0){
+          heat_load[equation_number] += shape_function_[j]*
+          current_heat_generation(heater_number)*determinant_of_jacobian_matrix_*ksi_weight*eta_weight;
         }//if
       }//for j
     }//for l
@@ -1174,12 +1207,12 @@ void HeaterElements::set_element_heat_matrix(){
 
   //---------zero out element K   matrix--------------
   for(int i=0;i<Constants::kNumOfNodesInElement_;i++){
-      element_heat_vector_[i]=0.0;
+    element_heat_vector_[i]=0.0;
   }
 
   for(int i=0;i<Constants::kNumOfNodesInElement_;i++){ 
     for(int k=0;k<num_of_integration_points;k++){
-      double ksi_coordinate = coordinates_of_integration_points[k];  //gaussian piont coordinate
+      double ksi_coordinate = coordinates_of_integration_points[k];  //gaussian point coordinate
       double ksi_weight = weights_of_integration_points[k];    //weight of gaussian quadrature
 
       for(int l=0;l<num_of_integration_points;l++){
@@ -1965,7 +1998,7 @@ void GlobalVectorsAndMatrices::ZeroVectorAndMatrix(){
     stiffness_matrix_[i]=0.0;
     mass_matrix_[i]=0.0;
     radiation_tangential_matrix_[i]=0.0;
-    body_heat_flux_tangential_matrix_[i]=0.0;
+//    body_heat_flux_tangential_matrix_[i]=0.0;
     jacobian_matrix_global_[i]=0.0;
   }
   for(int i=0; i<heat_load_.size(); i++){
@@ -1990,9 +2023,9 @@ void Assemble::AssembleGlobalJacobian(GlobalVectorsAndMatrices* global_vectors_a
   int size_of_desparsed_matrix = ((*global_vectors_and_matrices).get_jacobian_matrix_global()).size();
   for(int i=0; i<size_of_desparsed_matrix; i++){
     (*global_vectors_and_matrices).get_jacobian_matrix_global()[i] = (*global_vectors_and_matrices).get_mass_matrix()[i] 
-                                                                 +(*global_vectors_and_matrices).get_stiffness_matrix()[i] 
-                                                                 +(*global_vectors_and_matrices).get_radiation_tangential_matrix()[i] 
-                                                                 +(*global_vectors_and_matrices).get_body_heat_flux_tangential()[i];
+                                                                 +(*global_vectors_and_matrices).get_stiffness_matrix()[i]
+                                                                 +(*global_vectors_and_matrices).get_radiation_tangential_matrix()[i];
+                                                                // +(*global_vectors_and_matrices).get_body_heat_flux_tangential()[i];
   }
 }
 
@@ -2338,10 +2371,10 @@ void CopperSurfTemperatureDistribution::PrintOutTemperature(int num_of_equations
 class InverseAnalysisMatrices{
 public:
   void InitializeInverseAnalysisMatrices(int, int, std::vector<double> &, CopperSurfTemperatureDistribution*);
-  void SetHeatersHeatGeneration(const double, Initialization*, HeaterElements*, std::vector<int> &, std::vector<int> &, std::vector<double> &, std::vector<double> &, std::vector<double> &);
   void UpdateCurrents(const double, Initialization *, HeaterElements *, std::vector<int> &, std::vector<int> &, std::vector<double> &, std::vector<double> &, std::vector<double> &, Solver *);
   int HeatGenerationSolver(Eigen::VectorXd &, Solver *);
   void SensitivityMatrixSolver(Eigen::MatrixXd &, GlobalVectorsAndMatrices *);
+  Eigen::VectorXd & get_current_heat_generation(){return current_heat_generation_;}
 
 private:
   Eigen::VectorXd current_heat_generation_;
@@ -2378,21 +2411,6 @@ void InverseAnalysisMatrices::InitializeInverseAnalysisMatrices(const int num_of
   LHS_normal_equations_.setZero(Constants::kNumOfHeaters_, Constants::kNumOfHeaters_);
 }
 
-void InverseAnalysisMatrices::SetHeatersHeatGeneration(const double heater_cross_section_area_si_unit, Initialization *initialization, HeaterElements *heater_elements, std::vector<int> &elements_as_heater, std::vector<int> &nodes_in_elements, std::vector<double> &x_coordinates, std::vector<double> &y_coordinates, std::vector<double> &current_temperature_field){
-
-  for(int heater_number=0; heater_number<Constants::kNumOfHeaters_; heater_number++){
-    double current_si_unit = (*(*initialization).get_currents_in_heater()).get_current_in_heater()[heater_number]*1.0e-3; //mA -> A
-    double current_density = current_si_unit / heater_cross_section_area_si_unit;
-
-    double resistivity_si_unit = (*heater_elements).get_resistivity(heater_number, elements_as_heater, nodes_in_elements, 
-      x_coordinates, y_coordinates, current_temperature_field, initialization);
-
-    current_heat_generation_(heater_number) = resistivity_si_unit * current_density * current_density;
-  }
-
-  current_heat_generation_ *= 1.0e-6; // [N]/([S][M]^2)  ->  [N]/([S][mm]^2) *1.0e-6
-}
-
 int InverseAnalysisMatrices::HeatGenerationSolver(Eigen::VectorXd &temperature_now, Solver *solver){
   temperature_increment_ = temperature_desired_ - temperature_now;
 
@@ -2415,9 +2433,14 @@ int InverseAnalysisMatrices::HeatGenerationSolver(Eigen::VectorXd &temperature_n
     LHS_matrix_ = R_matrix_*sensitivity_matrix_;
     LHS_normal_equations_ = LHS_matrix_.transpose()*LHS_matrix_ + Constants::lambda_*(Eigen::MatrixXd::Identity(Constants::kNumOfHeaters_, Constants::kNumOfHeaters_));
     heat_generation_increments_ = LHS_normal_equations_.jacobiSvd(Eigen::ComputeThinU|Eigen::ComputeThinV).solve(LHS_matrix_.transpose()*temperature_increment_);
-//    std::cout << heat_generation_increments_ << std::endl<<std::endl;
-//    getchar();
     current_heat_generation_ += heat_generation_increments_;
+  }
+
+  for(int heater_number=0; heater_number<Constants::kNumOfHeaters_; heater_number++){
+    if(current_heat_generation_(heater_number) < 0.0){//components of current_heat_generation_ cannot be negative values.
+      printf("body heat flux set to zero !!!\n");
+      current_heat_generation_(heater_number) = 0.0;
+    }
   }
   return 0;
 } 
@@ -2689,7 +2712,7 @@ int main(){
         elemental_mass_matrix.set_coordinates_in_this_element(element_number, nodes_in_elements, x_coordinates, y_coordinates);
         elemental_mass_matrix.set_element_mass_matrix(element_number, nodes_in_elements, material_id_of_elements, current_temperature_field, 
           &temperature_dependent_variables, densities, time_increment);
-        elemental_mass_matrix.MapElementalToGlobalMass(mass_matrix, accumulative_half_band_width_vector,equation_numbers_in_elements, 
+        elemental_mass_matrix.MapElementalToGlobalMass(mass_matrix, accumulative_half_band_width_vector, equation_numbers_in_elements, 
           element_number);
 
         boundary_condition.FixTemperature(element_number, element_stiffness_matrix, equation_numbers_in_elements, heat_load);
@@ -2698,16 +2721,10 @@ int main(){
       for(int heater_element_number=0; heater_element_number<num_of_elements_as_heater; heater_element_number++){
         int element_number=elements_as_heater[heater_element_number];
         int heater_number=heater_element_number/(*(initialization.get_mesh_parameters())).get_mesh_seeds_on_heater();
-        elemental_body_heat_flux_tangential_matrix.set_coordinates_in_this_element(element_number, nodes_in_elements, x_coordinates, 
-          y_coordinates);
-        elemental_body_heat_flux_tangential_matrix.set_element_body_heat_flux_tangential_matrix(element_number, heater_element_number, 
-          nodes_in_elements, current_temperature_field, &temperature_dependent_variables, &initialization);
-        elemental_body_heat_flux_tangential_matrix.MapElementalToGlobalBodyHeatFluxTangentialMatrix(body_heat_flux_tangential_matrix, 
-          accumulative_half_band_width_vector, equation_numbers_in_elements, element_number);
 
         heater_elements.set_coordinates_in_this_element(element_number, nodes_in_elements, x_coordinates, y_coordinates);
-        heater_elements.HeatSupply(element_number, heater_element_number, heat_load, nodes_in_elements, 
-        equation_numbers_in_elements,current_temperature_field, &temperature_dependent_variables,&initialization);
+        heater_elements.HeatSupplyInverse(element_number, heater_element_number, heat_load, equation_numbers_in_elements, 
+          inverse_analysis_matrices.get_current_heat_generation(), &initialization);
         heater_elements.set_element_heat_matrix();
         heater_elements.MapElementalToGlobalHeatMatrix(heat_matrix,equation_numbers_in_elements,element_number,heater_number);
 
@@ -2732,7 +2749,6 @@ int main(){
 
 //      assemble.PrintGlobalJacobian(&global_vectors_and_matrices);
 //      assemble.PrintGlobalYfunction(&global_vectors_and_matrices);
-
 
 //     printf("%.6f %.6f\n",solver.NormOfVector(solution_of_last_iteration),solver.NormOfVector(right_hand_side_function));
 
@@ -2844,16 +2860,7 @@ int main(){
     if(fabs(temperature_norm_current - temperature_norm_last) < Constants::kNormTolerance_ ){//when temperature is in steady state, invoke inverse analysis
 
       inverse_analysis_matrices.SensitivityMatrixSolver(heat_matrix, &global_vectors_and_matrices);
-
-      inverse_analysis_matrices.SetHeatersHeatGeneration(heater_cross_section_area_si_unit, &initialization, &heater_elements,
-        elements_as_heater, nodes_in_elements, x_coordinates, y_coordinates, current_temperature_field);
-
       check_temperature_convergence = inverse_analysis_matrices.HeatGenerationSolver(temperature_now, &solver);
-
-      inverse_analysis_matrices.UpdateCurrents(heater_cross_section_area_si_unit, &initialization, &heater_elements, elements_as_heater,  
-        nodes_in_elements, x_coordinates, y_coordinates, current_temperature_field, &solver);
-//    (*(initialization.get_currents_in_heater())).PrintCurrents();
-
     }
 /*--------------------------------------------------------------------------------------*/
 
@@ -2874,6 +2881,9 @@ int main(){
     }
     printf("the %dth time integration completed\n\n", time_step+1);
   }//for int time_step loop
+
+  inverse_analysis_matrices.UpdateCurrents(heater_cross_section_area_si_unit, &initialization, &heater_elements, elements_as_heater,  
+    nodes_in_elements, x_coordinates, y_coordinates, current_temperature_field, &solver);
 
   FILE* current_densities;
   current_densities=fopen("current_densities.txt","w");
